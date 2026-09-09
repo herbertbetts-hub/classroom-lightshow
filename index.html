@@ -10,8 +10,8 @@
         h1 { font-size: 22px; margin: 0 0 5px 0; }
         p { font-size: 13px; color: #aaa; margin: 0 0 15px 0; }
         button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #00e676; color: black; }
-        #status { font-size: 20px; margin: 15px 0; color: #00e676; font-weight: bold; }
-        #debugLog { display: none; }
+        #status { font-size: 18px; margin: 15px 0; color: #00e676; font-weight: bold; }
+        #syncStatus { font-size: 11px; color: #777; margin-top: -8px; }
     </style>
 </head>
 <body>
@@ -19,54 +19,99 @@
     <div class="container">
         <h1>Classroom Sync</h1>
         <p>Tap activate and place near the speaker to join the synchronized light show.</p>
-        
+
         <button id="startBtn">Join Show</button>
         <div id="status">Offline</div>
+        <div id="syncStatus">Connecting to live settings...</div>
     </div>
 
+    <!-- Firebase (compat SDK, no build step needed) -->
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
     <script>
+        // ====== PASTE YOUR FIREBASE CONFIG HERE (same one used in admin.html) ======
+        const firebaseConfig = {
+            apiKey: "AIzaSyBfrPwA6YEAc8BAqKN-vf2U0Y3EV5oGqeE",
+            authDomain: "class-light-show.firebaseapp.com",
+            databaseURL: "https://class-light-show-default-rtdb.firebaseio.com",
+            projectId: "class-light-show",
+            storageBucket: "class-light-show.firebasestorage.app",
+            messagingSenderId: "898825356509",
+            appId: "1:898825356509:web:d2ac660a74656dec378734"
+        };
+        // ============================================================================
+
+        let db = null, settingsRef = null;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            settingsRef = db.ref("classroomSync/settings");
+        } catch (e) {
+            console.log("Firebase init failed, running on local defaults: " + e.message);
+        }
+
         let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
         const HISTORY_MAX = 30;
 
-        // Default constraints (Overridden dynamically by whatever audio the admin transmits)
+        // Local defaults — overridden live by whatever the admin broadcasts
         let activeColor = "#00ffcc";
-        let beatSensitivity = 15; 
+        let beatSensitivity = 15;
         let flashDuration = 80;
         let doubleBeatLockout = 330;
         let targetUltraFreq = 17500;
+        let musicTrackingEnabled = true;
         const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
+
+        // Subscribe to live settings from the admin console
+        if (settingsRef) {
+            settingsRef.on("value", (snapshot) => {
+                const data = snapshot.val();
+                if (!data) return;
+                if (typeof data.activeColor === "string") activeColor = data.activeColor;
+                if (typeof data.beatSensitivity === "number") beatSensitivity = data.beatSensitivity;
+                if (typeof data.flashDuration === "number") flashDuration = data.flashDuration;
+                if (typeof data.doubleBeatLockout === "number") doubleBeatLockout = data.doubleBeatLockout;
+                if (typeof data.targetUltraFreq === "number") targetUltraFreq = data.targetUltraFreq;
+                if (typeof data.musicTrackingEnabled === "boolean") musicTrackingEnabled = data.musicTrackingEnabled;
+                document.getElementById('syncStatus').innerText = "Live settings connected ✓";
+            }, (err) => {
+                document.getElementById('syncStatus').innerText = "Sync error — using local defaults";
+            });
+        } else {
+            document.getElementById('syncStatus').innerText = "No live sync — using local defaults";
+        }
 
         document.getElementById('startBtn').addEventListener('click', async () => {
             try {
-                const audioStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
+                const audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
                 });
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser(); analyser.fftSize = 512; 
+                analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 setInterval(processAudio, 20);
             } catch (err) { console.log("Mic error: " + err.message); }
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                track = stream.getVideoTracks()[0]; // Native iOS track connector
+                track = stream.getVideoTracks()[0];
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "🕺 SYNCED!";
-            } catch (err) { 
+            } catch (err) {
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "📺 SCREEN SYNC ACTIVE!";
             }
         });
 
         function processAudio() {
-            if (!analyser) return;
+            if (!analyser || !musicTrackingEnabled) return;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
-            
+
             const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
 
-            // 1. Low Frequency Bass Processing
-            let instantBassEnergy = 0, bassBinsLimit = 4; 
+            let instantBassEnergy = 0, bassBinsLimit = 4;
             for (let i = 0; i < bassBinsLimit; i++) { instantBassEnergy += dataArray[i]; }
             instantBassEnergy = instantBassEnergy / bassBinsLimit;
 
@@ -74,7 +119,6 @@
             for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
             let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
 
-            // 2. High Frequency Ultrasonic Processing
             const floatData = new Float32Array(analyser.frequencyBinCount);
             analyser.getFloatFrequencyData(floatData);
             const ultraLowBin = Math.floor((targetUltraFreq - ULTRA_TOLERANCE) / binSize), ultraHighBin = Math.ceil((targetUltraFreq + ULTRA_TOLERANCE) / binSize);
