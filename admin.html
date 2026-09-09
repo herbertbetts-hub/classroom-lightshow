@@ -11,10 +11,11 @@
         p { font-size: 11px; color: #b59999; margin: 0 0 12px 0; }
         button { padding: 16px 20px; font-size: 16px; margin: 5px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #ff1111; color: white; }
         #status { font-size: 14px; margin: 8px 0; color: #ff3333; font-weight: bold; text-transform: uppercase; }
+        #syncStatus { font-size: 10px; color: #a06a6a; margin: -4px 0 8px 0; }
         .admin-panel { background: #140505; border: 1px dashed #ff3333; padding: 12px; border-radius: 8px; margin-top: 5px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
         label { display: block; margin-bottom: 4px; color: #cca3a3; }
         input[type="range"], select, input[type="number"] { width: 100%; margin-bottom: 10px; background: #260a0a; color: #fff; border: 1px solid #591818; padding: 6px; border-radius: 4px; box-sizing: border-box; }
-        
+
         .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 8px; background: #260a0a; border-radius: 6px; border: 1px solid #591818; }
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -22,7 +23,7 @@
         .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
         input:checked + .slider { background-color: #ff1111; }
         input:checked + .slider:before { transform: translateX(20px); }
-        
+
         #debugLog { background: #000; color: #ff3333; padding: 6px; text-align: left; font-family: monospace; border-radius: 6px; margin-top: 10px; font-size: 9px; max-height: 60px; overflow-y: auto; width: 100%; box-sizing: border-box; border: 1px solid #330000; }
     </style>
 </head>
@@ -31,9 +32,10 @@
     <div class="container">
         <h1>Matrix Master Console</h1>
         <p>Classroom transmission array control center.</p>
-        
+
         <button id="startBtn">Activate Master Controls</button>
         <div id="status">Offline</div>
+        <div id="syncStatus">Connecting to broadcast channel...</div>
 
         <div class="admin-panel">
             <div class="toggle-container">
@@ -65,11 +67,38 @@
             <label>Double-Beat Lockout Window: <span id="lockVal">330</span>ms</label>
             <input type="range" id="lockSlider" min="150" max="600" step="10" value="330">
         </div>
-        
+
         <div id="debugLog">System tracking active...</div>
     </div>
 
-    <script {nonce}>
+    <!-- Firebase (compat SDK, no build step needed) -->
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
+    <script>
+        // ====== PASTE YOUR FIREBASE CONFIG HERE (same one used in index.html) ======
+        const firebaseConfig = {
+            apiKey: "AIzaSyBfrPwA6YEAc8BAqKN-vf2U0Y3EV5oGqeE",
+            authDomain: "class-light-show.firebaseapp.com",
+            databaseURL: "https://class-light-show-default-rtdb.firebaseio.com",
+            projectId: "class-light-show",
+            storageBucket: "class-light-show.firebasestorage.app",
+            messagingSenderId: "898825356509",
+            appId: "1:898825356509:web:d2ac660a74656dec378734"
+        };
+        // ============================================================================
+
+        let db = null, settingsRef = null;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            settingsRef = db.ref("classroomSync/settings");
+            document.getElementById('syncStatus').innerText = "Broadcast channel ready ✓";
+        } catch (e) {
+            document.getElementById('syncStatus').innerText = "Broadcast failed — students won't get live updates";
+            console.log("Firebase init failed: " + e.message);
+        }
+
         let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
         const HISTORY_MAX = 30;
 
@@ -77,16 +106,27 @@
         let musicTrackingEnabled = true;
         const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
 
-        document.getElementById('beatTrackerToggle').addEventListener('change', (e) => { musicTrackingEnabled = e.target.checked; log("Music tracking: " + (musicTrackingEnabled ? "ON" : "OFF")); });
-        document.getElementById('sensSlider').addEventListener('input', (e) => { beatSensitivity = parseInt(e.target.value); document.getElementById('sensVal').innerText = beatSensitivity; });
-        document.getElementById('durSlider').addEventListener('input', (e) => { flashDuration = parseInt(e.target.value); document.getElementById('durVal').innerText = flashDuration; });
-        document.getElementById('lockSlider').addEventListener('input', (e) => { doubleBeatLockout = parseInt(e.target.value); document.getElementById('lockVal').innerText = doubleBeatLockout; });
-        document.getElementById('colorSelect').addEventListener('change', (e) => { activeColor = e.target.value; });
-        document.getElementById('ultraFreqInput').addEventListener('change', (e) => { targetUltraFreq = parseInt(e.target.value); });
+        // Push the full settings object out to every connected student phone
+        function pushSettings() {
+            if (!settingsRef) return;
+            settingsRef.set({
+                activeColor, beatSensitivity, flashDuration, doubleBeatLockout, targetUltraFreq, musicTrackingEnabled
+            }).catch((e) => log("Broadcast error: " + e.message));
+        }
+
+        document.getElementById('beatTrackerToggle').addEventListener('change', (e) => { musicTrackingEnabled = e.target.checked; log("Music tracking: " + (musicTrackingEnabled ? "ON" : "OFF")); pushSettings(); });
+        document.getElementById('sensSlider').addEventListener('input', (e) => { beatSensitivity = parseInt(e.target.value); document.getElementById('sensVal').innerText = beatSensitivity; pushSettings(); });
+        document.getElementById('durSlider').addEventListener('input', (e) => { flashDuration = parseInt(e.target.value); document.getElementById('durVal').innerText = flashDuration; pushSettings(); });
+        document.getElementById('lockSlider').addEventListener('input', (e) => { doubleBeatLockout = parseInt(e.target.value); document.getElementById('lockVal').innerText = doubleBeatLockout; pushSettings(); });
+        document.getElementById('colorSelect').addEventListener('change', (e) => { activeColor = e.target.value; pushSettings(); });
+        document.getElementById('ultraFreqInput').addEventListener('change', (e) => { targetUltraFreq = parseInt(e.target.value); pushSettings(); });
 
         function log(msg) { const logBox = document.getElementById('debugLog'); logBox.innerHTML += "<br>> " + msg; logBox.scrollTop = logBox.scrollHeight; }
 
         document.getElementById('startBtn').addEventListener('click', async () => {
+            // Push current settings immediately so students sync as soon as admin goes live
+            pushSettings();
+
             try {
                 const audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -97,10 +137,10 @@
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                track = stream.getVideoTracks()[0]; // Native iOS track connector
+                track = stream.getVideoTracks()[0];
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "Console Active";
-            } catch (err) { 
+            } catch (err) {
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('status').innerText = "Screen Strobe Only";
             }
