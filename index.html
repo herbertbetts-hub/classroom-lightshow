@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom Sync</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; padding: 15px; transition: background 0.08s ease; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .container { max-width: 320px; padding: 20px; background: rgba(0,0,0,0.7); border-radius: 16px; backdrop-filter: blur(10px); box-sizing: border-box; }
+        h1 { font-size: 22px; margin: 0 0 5px 0; }
+        p { font-size: 13px; color: #aaa; margin: 0 0 15px 0; }
+        button { padding: 20px 40px; font-size: 20px; margin: 15px 0; border-radius: 12px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #00e676; color: black; }
+        #status { font-size: 20px; margin: 15px 0; color: #00e676; font-weight: bold; }
+        #debugLog { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Classroom Sync</h1>
+        <p>Tap activate and place near the speaker to join the synchronized light show.</p>
+        
+        <button id="startBtn">Join Show</button>
+        <div id="status">Offline</div>
+    </div>
+
+    <script>
+        let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
+        const HISTORY_MAX = 30;
+
+        // Default constraints (Overridden dynamically by whatever audio the admin transmits)
+        let activeColor = "#00ffcc";
+        let beatSensitivity = 15; 
+        let flashDuration = 80;
+        let doubleBeatLockout = 330;
+        let targetUltraFreq = 17500;
+        const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            try {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
+                });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser(); analyser.fftSize = 512; 
+                audioContext.createMediaStreamSource(audioStream).connect(analyser);
+                setInterval(processAudio, 20);
+            } catch (err) { console.log("Mic error: " + err.message); }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                track = stream.getVideoTracks()[0]; // Native iOS track connector
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('status').innerText = "🕺 SYNCED!";
+            } catch (err) { 
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('status').innerText = "📺 SCREEN SYNC ACTIVE!";
+            }
+        });
+
+        function processAudio() {
+            if (!analyser) return;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            
+            const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
+
+            // 1. Low Frequency Bass Processing
+            let instantBassEnergy = 0, bassBinsLimit = 4; 
+            for (let i = 0; i < bassBinsLimit; i++) { instantBassEnergy += dataArray[i]; }
+            instantBassEnergy = instantBassEnergy / bassBinsLimit;
+
+            let historySum = 0;
+            for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
+            let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
+
+            // 2. High Frequency Ultrasonic Processing
+            const floatData = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(floatData);
+            const ultraLowBin = Math.floor((targetUltraFreq - ULTRA_TOLERANCE) / binSize), ultraHighBin = Math.ceil((targetUltraFreq + ULTRA_TOLERANCE) / binSize);
+            let maxUltraVolume = -Infinity;
+            for (let i = ultraLowBin; i <= ultraHighBin; i++) { if (floatData[i] > maxUltraVolume) maxUltraVolume = floatData[i]; }
+
+            let triggerDetected = false;
+            if (instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { triggerDetected = true; }
+            if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) { triggerDetected = true; }
+
+            if (triggerDetected) { lastBeatTime = now; executeFlash(); }
+            energyHistory.push(instantBassEnergy);
+            if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
+        }
+
+        function executeFlash() {
+            document.body.style.background = activeColor;
+            setFlashlight(true);
+            setTimeout(() => { setFlashlight(false); document.body.style.background = "#121212"; }, flashDuration);
+        }
+
+        async function setFlashlight(turnOn) {
+            if (!track) return;
+            try { await track.applyConstraints({ advanced: [{ torch: turnOn }] }); } catch (e) {}
+        }
+    </script>
+</body>
+</html>
