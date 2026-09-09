@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Console - Red Edition</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #0f0202; color: #ff3333; padding: 10px; transition: background 0.08s ease; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; }
+        .container { width: 100%; max-width: 320px; padding: 15px; background: rgba(20,0,0,0.85); border: 1px solid #ff1111; border-radius: 12px; backdrop-filter: blur(10px); box-sizing: border-box; }
+        h1 { font-size: 18px; margin: 0 0 5px 0; color: #ff1111; letter-spacing: 0.5px; }
+        p { font-size: 11px; color: #b59999; margin: 0 0 12px 0; }
+        button { padding: 16px 20px; font-size: 16px; margin: 5px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #ff1111; color: white; }
+        #status { font-size: 14px; margin: 8px 0; color: #ff3333; font-weight: bold; text-transform: uppercase; }
+        .admin-panel { background: #140505; border: 1px dashed #ff3333; padding: 12px; border-radius: 8px; margin-top: 5px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
+        label { display: block; margin-bottom: 4px; color: #cca3a3; }
+        input[type="range"], select, input[type="number"] { width: 100%; margin-bottom: 10px; background: #260a0a; color: #fff; border: 1px solid #591818; padding: 6px; border-radius: 4px; box-sizing: border-box; }
+        
+        .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 8px; background: #260a0a; border-radius: 6px; border: 1px solid #591818; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #401010; transition: .3s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #ff1111; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        
+        #debugLog { background: #000; color: #ff3333; padding: 6px; text-align: left; font-family: monospace; border-radius: 6px; margin-top: 10px; font-size: 9px; max-height: 60px; overflow-y: auto; width: 100%; box-sizing: border-box; border: 1px solid #330000; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Matrix Master Console</h1>
+        <p>Classroom transmission array control center.</p>
+        
+        <button id="startBtn">Activate Master Controls</button>
+        <div id="status">Offline</div>
+
+        <div class="admin-panel">
+            <div class="toggle-container">
+                <label style="margin: 0; color: #fff; font-weight: bold;">Music Beat Tracking:</label>
+                <label class="switch">
+                    <input type="checkbox" id="beatTrackerToggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <label>Strobe Flash Color:</label>
+            <select id="colorSelect">
+                <option value="#ff1111" selected>Solid Crimson Red</option>
+                <option value="#00ffcc">Neon Cyan</option>
+                <option value="#ff0055">Neon Pink</option>
+                <option value="#9900ff">Neon Purple</option>
+                <option value="#ffffff">Pure White</option>
+            </select>
+
+            <label>Ultrasonic Command Pitch (Hz):</label>
+            <input type="number" id="ultraFreqInput" value="17500" min="15000" max="22000" step="100">
+
+            <label>Music Beat Sensitivity (dB): <span id="sensVal">15</span></label>
+            <input type="range" id="sensSlider" min="5" max="40" step="1" value="15">
+
+            <label>Flash Duration: <span id="durVal">80</span>ms</label>
+            <input type="range" id="durSlider" min="30" max="500" step="10" value="80">
+
+            <label>Double-Beat Lockout Window: <span id="lockVal">330</span>ms</label>
+            <input type="range" id="lockSlider" min="150" max="600" step="10" value="330">
+        </div>
+        
+        <div id="debugLog">System tracking active...</div>
+    </div>
+
+    <script {nonce}>
+        let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
+        const HISTORY_MAX = 30;
+
+        let activeColor = "#ff1111", beatSensitivity = 15, flashDuration = 80, doubleBeatLockout = 330, targetUltraFreq = 17500;
+        let musicTrackingEnabled = true;
+        const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
+
+        document.getElementById('beatTrackerToggle').addEventListener('change', (e) => { musicTrackingEnabled = e.target.checked; log("Music tracking: " + (musicTrackingEnabled ? "ON" : "OFF")); });
+        document.getElementById('sensSlider').addEventListener('input', (e) => { beatSensitivity = parseInt(e.target.value); document.getElementById('sensVal').innerText = beatSensitivity; });
+        document.getElementById('durSlider').addEventListener('input', (e) => { flashDuration = parseInt(e.target.value); document.getElementById('durVal').innerText = flashDuration; });
+        document.getElementById('lockSlider').addEventListener('input', (e) => { doubleBeatLockout = parseInt(e.target.value); document.getElementById('lockVal').innerText = doubleBeatLockout; });
+        document.getElementById('colorSelect').addEventListener('change', (e) => { activeColor = e.target.value; });
+        document.getElementById('ultraFreqInput').addEventListener('change', (e) => { targetUltraFreq = parseInt(e.target.value); });
+
+        function log(msg) { const logBox = document.getElementById('debugLog'); logBox.innerHTML += "<br>> " + msg; logBox.scrollTop = logBox.scrollHeight; }
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            try {
+                const audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
+                audioContext.createMediaStreamSource(audioStream).connect(analyser);
+                setInterval(processAudioStreams, 20);
+            } catch (err) { log("Mic error: " + err.message); }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                track = stream.getVideoTracks()[0]; // Native iOS track connector
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('status').innerText = "Console Active";
+            } catch (err) { 
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('status').innerText = "Screen Strobe Only";
+            }
+        });
+
+        function processAudioStreams() {
+            if (!analyser) return;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
+
+            let instantBassEnergy = 0, bassBinsLimit = 4;
+            for (let i = 0; i < bassBinsLimit; i++) { instantBassEnergy += dataArray[i]; }
+            instantBassEnergy = instantBassEnergy / bassBinsLimit;
+
+            let historySum = 0;
+            for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
+            let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
+
+            const floatData = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(floatData);
+            const ultraLowBin = Math.floor((targetUltraFreq - ULTRA_TOLERANCE) / binSize), ultraHighBin = Math.ceil((targetUltraFreq + ULTRA_TOLERANCE) / binSize);
+            let maxUltraVolume = -Infinity;
+            for (let i = ultraLowBin; i <= ultraHighBin; i++) { if (floatData[i] > maxUltraVolume) maxUltraVolume = floatData[i]; }
+
+            let frameTrigger = false;
+            if (musicTrackingEnabled && instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; }
+            if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; log("Ultrasonic code caught!"); }
+
+            if (frameTrigger) { lastBeatTime = now; executeLightSequence(); }
+            energyHistory.push(instantBassEnergy);
+            if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
+        }
+
+        function executeLightSequence() {
+            document.body.style.background = activeColor;
+            setTorchState(true);
+            setTimeout(() => { setTorchState(false); document.body.style.background = "#0f0202"; }, flashDuration);
+        }
+
+        async function setTorchState(turnOn) {
+            if (!track) return;
+            try { await track.applyConstraints({ advanced: [{ torch: turnOn }] }); } catch (e) {}
+        }
+    </script>
+</body>
+</html>
