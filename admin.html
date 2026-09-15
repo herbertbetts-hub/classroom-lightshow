@@ -35,6 +35,8 @@
 
         <button id="startBtn">Activate Master Controls</button>
         <button id="manualFlashBtn" style="background:#ffffff;color:#000;display:none;">⚡ Manual Flash (tap to beat)</button>
+        <button id="pauseResumeBtn" style="background:#ffaa00;color:#000;display:none;">⏸ Pause Show</button>
+        <button id="endShowBtn" style="background:#333;color:#fff;border:1px solid #ff1111;display:none;">⏹ End Show</button>
         <div id="status">Offline</div>
         <div id="syncStatus">Connecting to broadcast channel...</div>
 
@@ -114,6 +116,11 @@
         let musicTrackingEnabled = true;
         const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
 
+        // Show state: lets you pause/resume without losing mic+camera access, or fully end and restart clean
+        let showPaused = false;
+        let audioLoopInterval = null;
+        let currentAudioStream = null;
+
         // Push the full settings object out to every connected student phone
         function pushSettings() {
             if (!settingsRef) return;
@@ -132,9 +139,49 @@
         function log(msg) { const logBox = document.getElementById('debugLog'); logBox.innerHTML += "<br>> " + msg; logBox.scrollTop = logBox.scrollHeight; }
 
         document.getElementById('manualFlashBtn').addEventListener('click', () => {
+            if (showPaused) return; // ignore manual flashes while paused
             executeLightSequence();
             broadcastFlash();
         });
+
+        document.getElementById('pauseResumeBtn').addEventListener('click', () => {
+            showPaused = !showPaused;
+            const btn = document.getElementById('pauseResumeBtn');
+            if (showPaused) {
+                btn.innerText = "▶ Resume Show";
+                document.getElementById('status').innerText = "Paused";
+                log("Show paused.");
+            } else {
+                btn.innerText = "⏸ Pause Show";
+                document.getElementById('status').innerText = "Console Active";
+                log("Show resumed.");
+            }
+        });
+
+        document.getElementById('endShowBtn').addEventListener('click', () => {
+            endShow();
+        });
+
+        function endShow() {
+            // Stop the detection loop
+            if (audioLoopInterval) { clearInterval(audioLoopInterval); audioLoopInterval = null; }
+            // Release the microphone
+            if (currentAudioStream) { currentAudioStream.getTracks().forEach(t => t.stop()); currentAudioStream = null; }
+            // Release the camera/torch
+            if (track) { setTorchState(false); track.stop(); track = null; }
+            // Reset internal state so a fresh Activate starts clean
+            analyser = null; energyHistory = []; lastBeatTime = 0; showPaused = false;
+            document.body.style.background = "#0f0202";
+
+            // Reset UI back to the starting screen
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('manualFlashBtn').style.display = 'none';
+            document.getElementById('pauseResumeBtn').style.display = 'none';
+            document.getElementById('pauseResumeBtn').innerText = "⏸ Pause Show";
+            document.getElementById('endShowBtn').style.display = 'none';
+            document.getElementById('status').innerText = "Offline";
+            log("Show ended. Tap Activate to restart.");
+        }
 
         document.getElementById('startBtn').addEventListener('click', async () => {
             // Push current settings immediately so students sync as soon as admin goes live
@@ -142,6 +189,7 @@
 
             try {
                 const audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+                currentAudioStream = audioStream;
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 if (audioContext.state === 'suspended') {
                     await audioContext.resume(); // iOS Safari starts AudioContext suspended — must resume inside a user gesture
@@ -149,7 +197,7 @@
                 analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
                 log("Mic connected — state: " + audioContext.state);
-                setInterval(processAudioStreams, 20);
+                audioLoopInterval = setInterval(processAudioStreams, 20);
             } catch (err) { log("Mic error: " + err.message); }
 
             try {
@@ -157,10 +205,14 @@
                 track = stream.getVideoTracks()[0];
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('manualFlashBtn').style.display = 'block';
+                document.getElementById('pauseResumeBtn').style.display = 'block';
+                document.getElementById('endShowBtn').style.display = 'block';
                 document.getElementById('status').innerText = "Console Active";
             } catch (err) {
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('manualFlashBtn').style.display = 'block';
+                document.getElementById('pauseResumeBtn').style.display = 'block';
+                document.getElementById('endShowBtn').style.display = 'block';
                 document.getElementById('status').innerText = "Screen Strobe Only";
             }
         });
@@ -168,7 +220,7 @@
         let lastDebugLog = 0;
 
         function processAudioStreams() {
-            if (!analyser) return;
+            if (!analyser || showPaused) return;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
             const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
