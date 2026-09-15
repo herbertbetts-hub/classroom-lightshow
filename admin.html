@@ -143,8 +143,12 @@
             try {
                 const audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume(); // iOS Safari starts AudioContext suspended — must resume inside a user gesture
+                }
                 analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
                 audioContext.createMediaStreamSource(audioStream).connect(analyser);
+                log("Mic connected — state: " + audioContext.state);
                 setInterval(processAudioStreams, 20);
             } catch (err) { log("Mic error: " + err.message); }
 
@@ -161,6 +165,8 @@
             }
         });
 
+        let lastDebugLog = 0;
+
         function processAudioStreams() {
             if (!analyser) return;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -174,6 +180,12 @@
             let historySum = 0;
             for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
             let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
+
+            // Live level readout every ~800ms so you can confirm the mic is actually hearing sound
+            if (now - lastDebugLog > 800) {
+                lastDebugLog = now;
+                log("Level: " + Math.round(instantBassEnergy) + " / avg: " + Math.round(averageBassEnergy));
+            }
 
             const floatData = new Float32Array(analyser.frequencyBinCount);
             analyser.getFloatFrequencyData(floatData);
