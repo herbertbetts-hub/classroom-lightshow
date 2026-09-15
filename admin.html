@@ -34,6 +34,7 @@
         <p>Classroom transmission array control center.</p>
 
         <button id="startBtn">Activate Master Controls</button>
+        <button id="manualFlashBtn" style="background:#ffffff;color:#000;display:none;">⚡ Manual Flash (tap to beat)</button>
         <div id="status">Offline</div>
         <div id="syncStatus">Connecting to broadcast channel...</div>
 
@@ -88,15 +89,22 @@
         };
         // ============================================================================
 
-        let db = null, settingsRef = null;
+        let db = null, settingsRef = null, flashRef = null;
         try {
             firebase.initializeApp(firebaseConfig);
             db = firebase.database();
             settingsRef = db.ref("classroomSync/settings");
+            flashRef = db.ref("classroomSync/flashTrigger");
             document.getElementById('syncStatus').innerText = "Broadcast channel ready ✓";
         } catch (e) {
             document.getElementById('syncStatus').innerText = "Broadcast failed — students won't get live updates";
             console.log("Firebase init failed: " + e.message);
+        }
+
+        // Sends a "flash now" signal to every connected student phone at once
+        function broadcastFlash() {
+            if (!flashRef) return;
+            flashRef.set(firebase.database.ServerValue.TIMESTAMP).catch((e) => log("Flash broadcast error: " + e.message));
         }
 
         let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
@@ -123,6 +131,11 @@
 
         function log(msg) { const logBox = document.getElementById('debugLog'); logBox.innerHTML += "<br>> " + msg; logBox.scrollTop = logBox.scrollHeight; }
 
+        document.getElementById('manualFlashBtn').addEventListener('click', () => {
+            executeLightSequence();
+            broadcastFlash();
+        });
+
         document.getElementById('startBtn').addEventListener('click', async () => {
             // Push current settings immediately so students sync as soon as admin goes live
             pushSettings();
@@ -139,9 +152,11 @@
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 track = stream.getVideoTracks()[0];
                 document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('manualFlashBtn').style.display = 'block';
                 document.getElementById('status').innerText = "Console Active";
             } catch (err) {
                 document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('manualFlashBtn').style.display = 'block';
                 document.getElementById('status').innerText = "Screen Strobe Only";
             }
         });
@@ -170,7 +185,7 @@
             if (musicTrackingEnabled && instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; }
             if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; log("Ultrasonic code caught!"); }
 
-            if (frameTrigger) { lastBeatTime = now; executeLightSequence(); }
+            if (frameTrigger) { lastBeatTime = now; executeLightSequence(); broadcastFlash(); }
             energyHistory.push(instantBassEnergy);
             if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
         }
