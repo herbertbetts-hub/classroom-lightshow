@@ -42,37 +42,30 @@
         };
         // ============================================================================
 
-        let db = null, settingsRef = null;
+        let db = null, settingsRef = null, flashRef = null;
         try {
             firebase.initializeApp(firebaseConfig);
             db = firebase.database();
             settingsRef = db.ref("classroomSync/settings");
+            flashRef = db.ref("classroomSync/flashTrigger");
         } catch (e) {
-            console.log("Firebase init failed, running on local defaults: " + e.message);
+            console.log("Firebase init failed: " + e.message);
         }
 
-        let audioContext, analyser, track = null, lastBeatTime = 0, energyHistory = [];
-        const HISTORY_MAX = 30;
+        let track = null;
 
         // Local defaults — overridden live by whatever the admin broadcasts
         let activeColor = "#00ffcc";
-        let beatSensitivity = 15;
         let flashDuration = 80;
-        let doubleBeatLockout = 330;
-        let targetUltraFreq = 17500;
         let musicTrackingEnabled = true;
-        const ULTRA_TOLERANCE = 300, ULTRA_THRESHOLD = -66;
 
-        // Subscribe to live settings from the admin console
+        // Subscribe to live settings (color, duration, on/off) from the admin console
         if (settingsRef) {
             settingsRef.on("value", (snapshot) => {
                 const data = snapshot.val();
                 if (!data) return;
                 if (typeof data.activeColor === "string") activeColor = data.activeColor;
-                if (typeof data.beatSensitivity === "number") beatSensitivity = data.beatSensitivity;
                 if (typeof data.flashDuration === "number") flashDuration = data.flashDuration;
-                if (typeof data.doubleBeatLockout === "number") doubleBeatLockout = data.doubleBeatLockout;
-                if (typeof data.targetUltraFreq === "number") targetUltraFreq = data.targetUltraFreq;
                 if (typeof data.musicTrackingEnabled === "boolean") musicTrackingEnabled = data.musicTrackingEnabled;
                 document.getElementById('syncStatus').innerText = "Live settings connected ✓";
             }, (err) => {
@@ -82,17 +75,17 @@
             document.getElementById('syncStatus').innerText = "No live sync — using local defaults";
         }
 
-        document.getElementById('startBtn').addEventListener('click', async () => {
-            try {
-                const audioStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
-                });
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser(); analyser.fftSize = 512;
-                audioContext.createMediaStreamSource(audioStream).connect(analyser);
-                setInterval(processAudio, 20);
-            } catch (err) { console.log("Mic error: " + err.message); }
+        // Subscribe to the admin's "flash now" broadcast — every phone reacts to the SAME signal,
+        // instead of each phone trying to detect the beat itself through its own mic.
+        let skippedInitialFlash = false;
+        if (flashRef) {
+            flashRef.on("value", () => {
+                if (!skippedInitialFlash) { skippedInitialFlash = true; return; } // don't flash on first connect
+                if (musicTrackingEnabled) executeFlash();
+            });
+        }
 
+        document.getElementById('startBtn').addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 track = stream.getVideoTracks()[0];
@@ -103,36 +96,6 @@
                 document.getElementById('status').innerText = "📺 SCREEN SYNC ACTIVE!";
             }
         });
-
-        function processAudio() {
-            if (!analyser || !musicTrackingEnabled) return;
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-
-            const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
-
-            let instantBassEnergy = 0, bassBinsLimit = 4;
-            for (let i = 0; i < bassBinsLimit; i++) { instantBassEnergy += dataArray[i]; }
-            instantBassEnergy = instantBassEnergy / bassBinsLimit;
-
-            let historySum = 0;
-            for (let i = 0; i < energyHistory.length; i++) { historySum += energyHistory[i]; }
-            let averageBassEnergy = energyHistory.length > 0 ? (historySum / energyHistory.length) : 100;
-
-            const floatData = new Float32Array(analyser.frequencyBinCount);
-            analyser.getFloatFrequencyData(floatData);
-            const ultraLowBin = Math.floor((targetUltraFreq - ULTRA_TOLERANCE) / binSize), ultraHighBin = Math.ceil((targetUltraFreq + ULTRA_TOLERANCE) / binSize);
-            let maxUltraVolume = -Infinity;
-            for (let i = ultraLowBin; i <= ultraHighBin; i++) { if (floatData[i] > maxUltraVolume) maxUltraVolume = floatData[i]; }
-
-            let triggerDetected = false;
-            if (instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { triggerDetected = true; }
-            if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) { triggerDetected = true; }
-
-            if (triggerDetected) { lastBeatTime = now; executeFlash(); }
-            energyHistory.push(instantBassEnergy);
-            if (energyHistory.length > HISTORY_MAX) { energyHistory.shift(); }
-        }
 
         function executeFlash() {
             document.body.style.background = activeColor;
