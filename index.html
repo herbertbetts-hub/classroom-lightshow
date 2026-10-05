@@ -30,17 +30,17 @@
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 
     <script>
-        // ====== PASTE YOUR FIREBASE CONFIG HERE (same one used in admin.html) ======
+        // ====== Firebase config (class-lightshow-2, personal account) — same in admin.html ======
         const firebaseConfig = {
-            apiKey: "AIzaSyBfrPwA6YEAc8BAqKN-vf2U0Y3EV5oGqeE",
-            authDomain: "class-light-show.firebaseapp.com",
-            databaseURL: "https://class-light-show-default-rtdb.firebaseio.com",
-            projectId: "class-light-show",
-            storageBucket: "class-light-show.firebasestorage.app",
-            messagingSenderId: "898825356509",
-            appId: "1:898825356509:web:d2ac660a74656dec378734"
+            apiKey: "AIzaSyAPCJlL56ql7Is_wtkJUhVWhhuCp4mCvYM",
+            authDomain: "class-lightshow-2.firebaseapp.com",
+            databaseURL: "https://class-lightshow-2-default-rtdb.firebaseio.com",
+            projectId: "class-lightshow-2",
+            storageBucket: "class-lightshow-2.firebasestorage.app",
+            messagingSenderId: "917117234336",
+            appId: "1:917117234336:web:39413b4adffc9c7e112dc5"
         };
-        // ============================================================================
+        // =========================================================================================
 
         let db = null, settingsRef = null, flashRef = null;
         try {
@@ -75,8 +75,7 @@
             document.getElementById('syncStatus').innerText = "No live sync — using local defaults";
         }
 
-        // Subscribe to the admin's "flash now" broadcast — every phone reacts to the SAME signal,
-        // instead of each phone trying to detect the beat itself through its own mic.
+        // Subscribe to the admin's "flash now" broadcast — every phone reacts to the SAME signal
         let skippedInitialFlash = false;
         if (flashRef) {
             flashRef.on("value", () => {
