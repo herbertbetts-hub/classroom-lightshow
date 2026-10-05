@@ -257,7 +257,9 @@
 
             let frameTrigger = false;
             if (musicTrackingEnabled && instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; }
-            if (maxUltraVolume > ULTRA_THRESHOLD && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; log("Ultrasonic code caught!"); }
+               const ultraHeard = maxUltraVolume > ULTRA_THRESHOLD;
+            if (ultraHeard && !ultraWasHeard && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; log("Ultrasonic code caught!"); }
+            ultraWasHeard = ultraHeard;
 
             if (frameTrigger) { lastBeatTime = now; executeLightSequence(); broadcastFlash(); }
             energyHistory.push(instantBassEnergy);
