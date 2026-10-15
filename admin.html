@@ -10,11 +10,13 @@
         h1 { font-size: 18px; margin: 0 0 5px 0; color: #ff1111; letter-spacing: 0.5px; }
         p { font-size: 11px; color: #b59999; margin: 0 0 12px 0; }
         button { padding: 16px 20px; font-size: 16px; margin: 5px 0; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; width: 100%; background: #ff1111; color: white; }
+        button:disabled { opacity: 0.4; cursor: default; }
         #status { font-size: 14px; margin: 8px 0; color: #ff3333; font-weight: bold; text-transform: uppercase; }
         #syncStatus { font-size: 10px; color: #a06a6a; margin: -4px 0 8px 0; }
         .admin-panel { background: #140505; border: 1px dashed #ff3333; padding: 12px; border-radius: 8px; margin-top: 5px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
         label { display: block; margin-bottom: 4px; color: #cca3a3; }
         input[type="range"], select, input[type="number"] { width: 100%; margin-bottom: 10px; background: #260a0a; color: #fff; border: 1px solid #591818; padding: 6px; border-radius: 4px; box-sizing: border-box; }
+        input[type="file"] { width: 100%; margin-bottom: 10px; color: #cca3a3; font-size: 11px; }
 
         .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 8px; background: #260a0a; border-radius: 6px; border: 1px solid #591818; }
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
@@ -25,6 +27,13 @@
         input:checked + .slider:before { transform: translateX(20px); }
 
         #debugLog { background: #000; color: #ff3333; padding: 6px; text-align: left; font-family: monospace; border-radius: 6px; margin-top: 10px; font-size: 9px; max-height: 60px; overflow-y: auto; width: 100%; box-sizing: border-box; border: 1px solid #330000; }
+
+        /* Play Show panel */
+        #showPanel { display: none; background: #140505; border: 1px solid #ff3333; padding: 12px; border-radius: 8px; margin-top: 10px; text-align: left; font-size: 12px; width: 100%; box-sizing: border-box; }
+        #showPanel h2 { font-size: 14px; margin: 0 0 8px 0; color: #ff6666; text-align: center; }
+        #showMsg { font-size: 11px; color: #ffcc66; margin: 4px 0 8px 0; min-height: 14px; }
+        #showClock { font-size: 18px; font-weight: bold; text-align: center; color: #fff; margin: 6px 0; min-height: 22px; }
+        .showNote { font-size: 10px; color: #a06a6a; margin: 8px 0 0 0; }
     </style>
 </head>
 <body>
@@ -72,6 +81,34 @@
             <input type="range" id="lockSlider" min="150" max="600" step="10" value="330">
         </div>
 
+        <!-- ===== Pre-programmed show (no microphone needed) ===== -->
+        <div id="showPanel">
+            <h2>🎬 Play Show</h2>
+
+            <label>1. Pick a show:</label>
+            <select id="showSelect"><option value="">Loading shows…</option></select>
+
+            <label>2. Choose the song file on this device:</label>
+            <input type="file" id="songFile" accept="audio/*">
+
+            <button id="loadShowBtn" style="background:#ff6666;color:#000;">3. Load Show</button>
+            <div id="showMsg"></div>
+
+            <label>Start from:</label>
+            <select id="sectionSelect"><option value="0">From the top</option></select>
+
+            <label>Flash delay: <span id="offsetVal">0</span> ms</label>
+            <input type="range" id="offsetSlider" min="-150" max="400" step="10" value="0">
+            <div class="showNote" style="margin-top:-6px;margin-bottom:8px;">Raise it if the lights come BEFORE the beat (Bluetooth speakers). Lower it if they come after.</div>
+
+            <div id="showClock"></div>
+            <button id="showPlayBtn" disabled style="background:#00e676;color:#000;">▶ Play Show</button>
+            <button id="showPauseBtn" style="background:#ffaa00;color:#000;display:none;">⏸ Pause</button>
+            <button id="showStopBtn" style="background:#333;color:#fff;border:1px solid #ff1111;display:none;">⏹ Stop</button>
+
+            <div class="showNote">Announce a flashing-lights warning before you start. The show never flashes more than 3 times per second. Don't press "Activate Master Controls" for a pre-programmed show — the microphone isn't needed.</div>
+        </div>
+
         <div id="debugLog">System tracking active...</div>
     </div>
 
@@ -79,6 +116,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+    <script src="showplayer.js"></script>
 
     <script>
         // ====== Firebase config (class-lightshow-2, personal account) — same in index.html ======
@@ -119,6 +157,7 @@
             const ok = !!user && user.email === ADMIN_EMAIL;
             document.getElementById('signInBtn').style.display = ok ? 'none' : 'block';
             document.getElementById('startBtn').style.display = ok ? 'block' : 'none';
+            document.getElementById('showPanel').style.display = ok ? 'block' : 'none';
             if (user && !ok) { log("Not authorized: " + user.email); firebase.auth().signOut(); }
             if (ok) log("Signed in as " + user.email);
         });
@@ -195,6 +234,7 @@
             document.getElementById('pauseResumeBtn').innerText = "⏸ Pause Show";
             document.getElementById('endShowBtn').style.display = 'none';
             document.getElementById('status').innerText = "Offline";
+            if (typeof stopShow === 'function' && showMode !== 'stopped') stopShow();
             log("Show ended. Tap Activate to restart.");
         }
 
@@ -232,6 +272,7 @@
 
         function processAudioStreams() {
             if (!analyser || showPaused) return;
+            if (showPlayer && showPlayer.isPlaying()) return; // pre-programmed show is running — don't also react to the mic
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
             const sampleRate = audioContext.sampleRate, binSize = sampleRate / analyser.fftSize, now = Date.now();
@@ -257,7 +298,7 @@
 
             let frameTrigger = false;
             if (musicTrackingEnabled && instantBassEnergy > (averageBassEnergy + beatSensitivity) && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; }
-               const ultraHeard = maxUltraVolume > ULTRA_THRESHOLD;
+            const ultraHeard = maxUltraVolume > ULTRA_THRESHOLD;
             if (ultraHeard && !ultraWasHeard && (now - lastBeatTime > doubleBeatLockout)) { frameTrigger = true; log("Ultrasonic code caught!"); }
             ultraWasHeard = ultraHeard;
 
@@ -276,6 +317,163 @@
             if (!track) return;
             try { await track.applyConstraints({ advanced: [{ torch: turnOn }] }); } catch (e) {}
         }
+
+        // =====================================================================
+        //  Pre-programmed show: song plays from THIS device, cues run on a
+        //  shared server clock, so every phone flashes in time with the music.
+        // =====================================================================
+        const $ = (id) => document.getElementById(id);
+
+        let showDef = null, showBuf = null, showCtx = null, showSrc = null;
+        let songZero = 0, startPosSec = 0, showPausedPos = 0, showSeq = 0, showOffsetMs = 0;
+        let showMode = 'stopped'; // 'stopped' | 'playing' | 'paused'
+        const ctlRef = db ? db.ref("classroomSync/showCtl") : null;
+        const dataRef = db ? db.ref("classroomSync/showData") : null;
+
+        function fmtTime(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, '0'); }
+        function setShowMsg(t) { $('showMsg').innerText = t; }
+
+        // The admin's own screen follows the same show as the student phones
+        let showPlayer = null;
+        if (db && window.LightShow) {
+            showPlayer = LightShow.create({
+                db: db,
+                idleBg: "#0f0202",
+                setTorch: (on) => setTorchState(on),
+                getFlashDuration: () => flashDuration,
+                onStatus: (s) => {
+                    const el = $('showClock');
+                    if (s.state === 'countdown') el.innerText = "Starting in " + s.startsIn + "…";
+                    else if (s.state === 'playing') el.innerText = "🎵 " + fmtTime(s.posSec) + (showDef ? " / " + fmtTime(showDef.duration) : "");
+                    else if (s.state === 'paused') el.innerText = "⏸ Paused at " + fmtTime(showPausedPos);
+                    else el.innerText = "";
+                }
+            });
+            showPlayer.enable();
+        }
+
+        async function loadShowList() {
+            const sel = $('showSelect');
+            try {
+                const r = await fetch('songs/index.json?' + Date.now());
+                const list = await r.json();
+                sel.innerHTML = '';
+                list.forEach(s => { const o = document.createElement('option'); o.value = s.show; o.textContent = s.title; sel.appendChild(o); });
+                if (!list.length) sel.innerHTML = '<option value="">No shows found</option>';
+            } catch (e) {
+                sel.innerHTML = '<option value="">No shows found</option>';
+                log("Show list error: " + e.message);
+            }
+        }
+        loadShowList();
+
+        function updateShowButtons() {
+            const loaded = !!showBuf;
+            $('showPlayBtn').disabled = !loaded;
+            $('showPlayBtn').style.display = showMode === 'playing' ? 'none' : 'block';
+            $('showPlayBtn').innerText = showMode === 'paused' ? "▶ Resume" : "▶ Play Show";
+            $('showPauseBtn').style.display = showMode === 'playing' ? 'block' : 'none';
+            $('showStopBtn').style.display = showMode === 'stopped' ? 'none' : 'block';
+        }
+
+        async function loadShow() {
+            const url = $('showSelect').value, file = $('songFile').files[0];
+            if (!url) { setShowMsg("Pick a show first."); return; }
+            if (!file) { setShowMsg("Choose the song file on this device first."); return; }
+            if (!dataRef) { setShowMsg("Broadcast channel isn't connected."); return; }
+            setShowMsg("Loading…");
+            try {
+                if (showMode !== 'stopped') stopShow();
+                const r = await fetch(url + '?' + Date.now());
+                showDef = await r.json();
+                showCtx = showCtx || new (window.AudioContext || window.webkitAudioContext)();
+                await showCtx.resume();
+                showBuf = await showCtx.decodeAudioData(await file.arrayBuffer());
+
+                await dataRef.set({ id: showDef.id, json: JSON.stringify({ title: showDef.title, palette: showDef.palette, cues: showDef.cues }) });
+
+                // Section picker + default delay
+                const sec = $('sectionSelect');
+                sec.innerHTML = '<option value="0">From the top</option>';
+                (showDef.sections || []).forEach(s => { const o = document.createElement('option'); o.value = s.start; o.textContent = fmtTime(s.start / 1000) + "  " + s.name; sec.appendChild(o); });
+                showOffsetMs = showDef.defaultOffsetMs || 0;
+                $('offsetSlider').value = showOffsetMs; $('offsetVal').innerText = showOffsetMs;
+
+                const diff = Math.abs(showBuf.duration - showDef.duration);
+                if (diff > 1.5) setShowMsg("⚠️ This file is " + fmtTime(showBuf.duration) + " but the show was built for " + fmtTime(showDef.duration) + ". It's probably a different version, so flashes may be off. Use the same file.");
+                else setShowMsg("✓ Loaded: " + showDef.title + " (" + fmtTime(showBuf.duration) + "). Students already have the cues.");
+                log("Show loaded: " + showDef.title);
+            } catch (e) {
+                showBuf = null;
+                setShowMsg("Load failed: " + e.message);
+                log("Show load error: " + e.message);
+            }
+            updateShowButtons();
+        }
+
+        function killSource() {
+            if (showSrc) { const s = showSrc; showSrc = null; try { s.onended = null; s.stop(); } catch (e) {} }
+        }
+
+        function startSource(posSec) {
+            killSource();
+            const lead = 2.5; // seconds of lead-in so every phone has time to get the start signal
+            const src = showCtx.createBufferSource();
+            src.buffer = showBuf; src.connect(showCtx.destination);
+            const serverNow = showPlayer.now();
+            src.start(showCtx.currentTime + lead, posSec);
+            src.onended = () => { if (showSrc === src) { showSrc = null; endOfSong(); } };
+            showSrc = src;
+            startPosSec = posSec;
+            songZero = serverNow + lead * 1000 - posSec * 1000;  // server time at which song 0:00 plays
+            showMode = 'playing';
+            ctlRef.set({ state: 'playing', songZero: songZero, offsetMs: showOffsetMs, showId: showDef.id, seq: ++showSeq })
+                .catch(e => log("Show start error: " + e.message));
+            updateShowButtons();
+            log("Show playing from " + fmtTime(posSec));
+        }
+
+        async function playShow() {
+            if (!showBuf || !showPlayer) return;
+            await showCtx.resume();
+            const pos = showMode === 'paused' ? showPausedPos : (parseFloat($('sectionSelect').value) || 0) / 1000;
+            startSource(pos);
+        }
+
+        function pauseShow() {
+            if (showMode !== 'playing') return;
+            showPausedPos = Math.max(startPosSec, (showPlayer.now() - songZero) / 1000);
+            killSource();
+            showMode = 'paused';
+            ctlRef.update({ state: 'paused' });
+            updateShowButtons();
+            log("Show paused at " + fmtTime(showPausedPos));
+        }
+
+        function stopShow() {
+            killSource();
+            showMode = 'stopped'; showPausedPos = 0;
+            if (ctlRef) ctlRef.update({ state: 'stopped' });
+            updateShowButtons();
+        }
+
+        function endOfSong() {
+            showMode = 'stopped'; showPausedPos = 0;
+            ctlRef.update({ state: 'stopped' });
+            updateShowButtons();
+            setShowMsg("Show finished.");
+        }
+
+        $('loadShowBtn').addEventListener('click', loadShow);
+        $('showPlayBtn').addEventListener('click', playShow);
+        $('showPauseBtn').addEventListener('click', pauseShow);
+        $('showStopBtn').addEventListener('click', () => { stopShow(); log("Show stopped."); });
+        $('offsetSlider').addEventListener('input', (e) => {
+            showOffsetMs = parseInt(e.target.value);
+            $('offsetVal').innerText = showOffsetMs;
+            if (ctlRef && showMode !== 'stopped') ctlRef.update({ offsetMs: showOffsetMs });
+        });
+        updateShowButtons();
     </script>
 </body>
 </html>
