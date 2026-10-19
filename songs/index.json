@@ -3,5 +3,20 @@
   "id": "shake-it-off",
   "title": "Shake It Off \u2014 Taylor Swift",
   "show": "songs/shake-it-off.json"
+ },
+ {
+  "id": "swag-surfin",
+  "title": "Swag Surfin' (Clean) \u2014 F.L.Y.",
+  "show": "songs/swag-surfin.json"
+ },
+ {
+  "id": "cant-stop-the-feeling",
+  "title": "Can't Stop the Feeling! \u2014 Justin Timberlake",
+  "show": "songs/cant-stop-the-feeling.json"
+ },
+ {
+  "id": "seven-nation-army",
+  "title": "Seven Nation Army \u2014 The White Stripes",
+  "show": "songs/seven-nation-army.json"
  }
 ]
